@@ -1,0 +1,105 @@
+---
+#Play for NXOS devices. works for firmware version above 7.3.... checks for LLDP and CDP and prefers CDP over LLDP. 
+- name: Cisco NXOS v7.3 or above Play
+  hosts: nxos # We want this play to run over hosts which are running nxos. This play reads all host entries from hosts file which are in block [nxos]
+  gather_facts: no #This is used for gathering basic information from Linux based systems (I could be wrong though but we can safely ignore it here)
+  connection: local #For all network device automation we use local connection. Why? Google it please. 
+  vars: # This is where we are setting some variables which will be used in tasks.
+    ssh:
+      host: "{{ ansible_host }}"
+      transport: cli
+    MidSeparator: '_' #This is separator between device Name and port number e.g devrot3_Eth3/1 
+    ScriptSignature: ' "Auto updated"'
+  
+  tasks:
+    - name: nxos ssh facts gathering #In this tasks we gather basic facts of remote devices. nxos_facts is Ansible module which gathers all basic information e.g CDP/LLDP neighbors,IP addresses, version etc
+      nxos_facts: #https://docs.ansible.com/ansible/latest/modules/nxos_facts_module.html
+        gather_subset: all #These gathered facts will be used in next tasks
+        provider: "{{ ssh }}" #ssh is variable we declared in vars: section
+#    - name: Display neighbors # Uncomment this task to debug and see what neighbors information were gathered. 
+#      debug:
+#        var: ansible_facts.net_neighbors
+
+    - name: Configure description using nxos_config #This is where we check if current description matched to CDP/LLDP. If not we change the description on switch and write changes
+      nxos_config: #https://docs.ansible.com/ansible/latest/modules/nxos_config_module.html
+        lines:
+          - description {{item.value[0].sysname}}{{MidSeparator}}{{item.value[0].port}}{{ScriptSignature}}
+        parents: "interface {{item.key}}" #Item.key will have interface name
+        save_when: changed #Only run "copy running startup" when previous commands has changed some config
+      with_dict: "{{ ansible_facts.net_neighbors }}" #We are looping over ansible_facts neighbors gathered in previous task , we skip records based on condition in next "when:" statement
+      when: (item.key != "mgmt0") and (ansible_facts.net_interfaces[item.key].description is not defined or (ansible_facts.net_interfaces[item.key].description is defined and item.value[0].sysname+MidSeparator+item.value[0].port+ScriptSignature != ansible_facts.net_interfaces[item.key].description))
+#Note that we want to ignore CDP/LLDP on mgmt0 interface because our devices are connected to Arista and Arista forwards all CDP packets to mgmt0 hence it show so many neighbors for CDP.
+
+
+#    - name: Configure description #This is where we check if current description matched to CDP/LLDP. If not we change the description on switch and write changes
+#      nxos_interface: #https://docs.ansible.com/ansible/latest/modules/nxos_interface_module.html
+#        interface: "{{item.key}}" #Item.key will have interface name
+#        description: item.value[0].sysname+MidSeparator+item.value[0].port+ScriptSignature
+#      with_dict: "{{ ansible_facts.net_neighbors }}" #We are looping over ansible_facts neighbors gathered in previous task , we skip records based on condition in next "when:" statement
+#      when: (item.key != "mgmt0") and (ansible_facts.net_interfaces[item.key].description is not defined or (ansible_facts.net_interfaces[item.key].description is defined and item.value[0].sysname+MidSeparator+item.value[0].port+ScriptSignature != ansible_facts.net_interfaces[item.key].description))
+#    - name: "Display devices which has no neighbors. Generally old firmware devices show no neighbors. Those which doesnt support json output. e.g show cdp neighbors  details | json"
+#      debug:
+#        msg: "{{ansible_host}} returned no neighbors"
+#      when: ansible_facts.net_neighbors|length==0
+       
+#Play for IOS devices, only works for LLDP Neighbors
+- name: Cisco IOS Play
+  hosts: ios
+  gather_facts: no
+  connection: local
+  vars:
+    ssh:
+      host: "{{ ansible_host }}"
+      #connection: network_cli 
+    include_vars: group_vars/vars
+    MidSeparator: '_' #This is separator between device Name and port number e.g devrot3_Eth3/1
+    ScriptSignature: ' "Auto updated"'
+
+  tasks:
+    - name: ios ssh facts task
+      ios_facts:
+        gather_subset:  
+          - interfaces
+        provider: "{{ ssh }}"
+
+    - name: Configure description using ios_config
+      ios_config:
+        lines:
+          - description {{item.value[0].host}}{{MidSeparator}}{{item.value[0].port}}{{ScriptSignature}}
+        parents: "interface {{item.key}}"
+        save_when: changed
+      with_dict: "{{ ansible_facts.net_neighbors | default({}) }}"
+      when: item.value[0].host+MidSeparator+item.value[0].port+ScriptSignature != ansible_facts.net_interfaces[item.key].description
+
+#Play for Arista devices. Only works for LLDP neighbors
+- name: Arista EOS play
+  hosts: eos 
+  gather_facts: no
+  connection: local 
+  vars:
+    ssh:
+      host: "{{ ansible_host }}"
+      transport: cli
+    MidSeparator: '_' #This is separator between device Name and port number e.g devrot3_Eth3/1
+    ScriptSignature: ' "Auto updated"'
+
+  tasks:
+    - name: eos ssh facts task
+      eos_facts:
+        gather_subset: all 
+#          - interfaces
+        provider: "{{ ssh }}"
+
+#    - name: Display neighbors
+#      debug:
+#        var: ansible_facts.net_neighbors
+    - name: Configure description using ios_config
+      eos_config:
+        #authorize: yes
+        timeout: 50
+        lines:
+          - description {{item.value[0].host}}{{MidSeparator}}{{item.value[0].port}}{{ScriptSignature}}
+        parents: "interface {{item.key}}"
+        save_when: changed
+      with_dict: "{{ ansible_facts.net_neighbors | default({}) }}"
+      when: item.value[0].host+MidSeparator+item.value[0].port+ScriptSignature != ansible_facts.net_interfaces[item.key].description

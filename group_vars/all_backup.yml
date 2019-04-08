@@ -1,0 +1,10 @@
+#Following line is to login to proxy/bastion/jump server. Replace userName with login user and jumpServer with IP or name of your jump server.
+ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -q userName@jumpServer"'
+ansible_ssh_extra_args: "-o UserKnownHostsFile=/dev/null -o ControlMaster=no"
+
+#Following user is used to login to network devices, user for username and ssh_pass for password
+ansible_user: cisco 
+ansible_ssh_pass: cisco
+
+#Note: Always use ansible-vault to encrypt file which contains sensitive information. 
+#learn about vault: https://medium.com/devops-process-and-tools/manage-secrets-with-ansible-vault-d0528b7a99f4
